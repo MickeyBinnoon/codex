@@ -1,0 +1,4 @@
+node_modules
+alchemist.db
+.env
+__pycache__
