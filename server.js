@@ -1,9 +1,16 @@
 const express = require('express');
-const bodyParser = require("body-parser");
+const bodyParser = require('body-parser');
 const dotenv = require('dotenv');
 const cookieSession = require('cookie-session');
 const passport = require('passport');
+const { encrypt } = require('./encryption');
 dotenv.config();
+const requiredEnv = ['GOOGLE_CLIENT_ID','GOOGLE_CLIENT_SECRET','STRIPE_SECRET_KEY','STRIPE_PRICE_ID','SESSION_SECRET','STRIPE_WEBHOOK_SECRET','ENCRYPTION_KEY'];
+const missing = requiredEnv.filter(k => !process.env[k]);
+if(missing.length){
+  console.error('Missing env vars: '+missing.join(', '));
+  process.exit(1);
+}
 const stripeKey = process.env.STRIPE_SECRET_KEY;
 const stripe = stripeKey ? require("stripe")(stripeKey) : null;
 const GoogleStrategy = require('passport-google-oauth20').Strategy;
@@ -65,7 +72,7 @@ passport.deserializeUser((id,done)=>{
 
 const app = express();
 app.use(bodyParser.json());
-app.use(cookieSession({name:'session', keys:['secret'], maxAge:24*60*60*1000}));
+app.use(cookieSession({name:'session', keys:[process.env.SESSION_SECRET], maxAge:24*60*60*1000}));
 app.use(passport.initialize());
 app.use(passport.session());
 
@@ -82,7 +89,9 @@ const ensureAuth = (req,res,next)=>{
 
 app.post('/api/save-keys', ensureAuth, (req,res)=>{
   const {apiKey, secretKey} = req.body;
-  db.run('UPDATE users SET alpaca_api_key=?, alpaca_secret_key=? WHERE id=?', [apiKey, secretKey, req.user.id], (err)=>{
+  const encKey = encrypt(apiKey);
+  const encSecret = encrypt(secretKey);
+  db.run('UPDATE users SET alpaca_api_key=?, alpaca_secret_key=? WHERE id=?', [encKey, encSecret, req.user.id], (err)=>{
     if(err) return res.status(500).json({error:'db'});
     res.json({status:'saved'});
   });
@@ -90,8 +99,15 @@ app.post('/api/save-keys', ensureAuth, (req,res)=>{
 
 app.post('/api/create-checkout-session', ensureAuth, async (req,res)=>{
   try{
+    let customerId = req.user.stripe_customer_id;
+    if(!customerId){
+      const customer = await stripe.customers.create({email:req.user.email});
+      customerId = customer.id;
+      db.run('UPDATE users SET stripe_customer_id=? WHERE id=?',[customerId, req.user.id]);
+    }
     const session = await stripe.checkout.sessions.create({
       mode:'subscription',
+      customer: customerId,
       line_items:[{price: process.env.STRIPE_PRICE_ID, quantity:1}],
       success_url: process.env.SUCCESS_URL || 'http://localhost:3000/dashboard',
       cancel_url: process.env.CANCEL_URL || 'http://localhost:3000/'
@@ -113,7 +129,7 @@ app.post('/webhook/stripe', bodyParser.raw({type:'application/json'}), (req,res)
   if(event.type === 'checkout.session.completed'){
     const session = event.data.object;
     const customerId = session.customer;
-    db.run('UPDATE users SET stripe_customer_id=?, is_active=1 WHERE id=?', [customerId, req.user ? req.user.id : null], ()=>{});
+    db.run('UPDATE users SET is_active=1 WHERE stripe_customer_id=?', [customerId], ()=>{});
   }
   res.json({received:true});
 });
@@ -134,5 +150,8 @@ app.get('/api/stats', ensureAuth, (req,res)=>{
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, ()=> console.log('Server running on '+PORT));
+if(require.main === module){
+  app.listen(PORT, ()=> console.log('Server running on '+PORT));
+}
+module.exports = app;
 

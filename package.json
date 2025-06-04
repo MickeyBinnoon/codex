@@ -4,7 +4,8 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "jest"
   },
   "keywords": [],
   "author": "",
@@ -19,5 +20,9 @@
     "passport-google-oauth20": "^2.0.0",
     "sqlite3": "^5.1.7",
     "stripe": "^18.2.1"
+  },
+  "devDependencies": {
+    "jest": "^29.6.1",
+    "supertest": "^6.3.3"
   }
 }

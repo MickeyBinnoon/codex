@@ -2,6 +2,7 @@ import os
 import time
 import sqlite3
 import requests
+from encryption import decrypt
 
 DB_PATH = 'alchemist.db'
 INTERVAL = int(os.getenv('BOT_INTERVAL', '300'))
@@ -15,9 +16,11 @@ def run_cycle(conn):
     for uid, api_key, secret_key in users:
         if not api_key or not secret_key:
             continue
+        api_key_dec = decrypt(api_key)
+        secret_key_dec = decrypt(secret_key)
         headers = {
-            'APCA-API-KEY-ID': api_key,
-            'APCA-API-SECRET-KEY': secret_key
+            'APCA-API-KEY-ID': api_key_dec,
+            'APCA-API-SECRET-KEY': secret_key_dec
         }
         try:
             r = requests.get(f"{API_BASE}/v2/account", headers=headers)
